@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Encode / Decode</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        body {
+            background-color: #001100;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+            margin: 0;
+            min-height: 100vh;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            border: 2px solid #00ff00;
+            padding: 20px;
+            background-color: #000;
+            box-shadow: 0 0 20px #00ff00;
+            position: relative;
+        }
+
+        .scanline {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(
+                to bottom,
+                rgba(0, 255, 0, 0.05) 50%,
+                rgba(0, 0, 0, 0.25) 50%
+            );
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 999;
+        }
+
+        h1 {
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            text-shadow: 0 0 10px #00ff00;
+        }
+
+        .control-panel {
+            display: grid;
+            grid-gap: 20px;
+            margin: 20px 0;
+        }
+
+        textarea, input {
+            background-color: #002200;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+        }
+
+        button {
+            background-color: #003300;
+            border: 2px solid #00ff00;
+            color: #00ff00;
+            padding: 10px 20px;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all 0.3s;
+        }
+
+        button:hover {
+            background-color: #00ff00;
+            color: #000;
+            box-shadow: 0 0 15px #00ff00;
+        }
+
+        .glow {
+            animation: glow 1s infinite alternate;
+        }
+
+        @keyframes glow {
+            from {
+                text-shadow: 0 0 5px #00ff00;
+            }
+            to {
+                text-shadow: 0 0 20px #00ff00;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="scanline"></div>
+    <div class="container">
+        <h1 class="glow">>_ RETRO 1838</h1>
+        
+        <div class="control-panel">
+            <textarea id="input" placeholder="Input message..." rows="5"></textarea>
+            <input type="text" id="seed" placeholder="Enter seed...">
+            
+            <div style="display: flex; gap: 10px;">
+                <button onclick="encodeMessage()">Encode</button>
+                <button onclick="decodeMessage()">Decode</button>
+            </div>
+            
+            <textarea id="output" placeholder="Result will appear here..." rows="5" readonly></textarea>
+        </div>
+    </div>
+
+    <script>
+        async function generateKeyStream(length, seed) {
+            const encoder = new TextEncoder();
+            let keyStream = new Uint8Array(length);
+            let counter = 0;
+            let generated = 0;
+
+            // Initial hash
+            let seedHash = CryptoJS.SHA256(seed).toString(CryptoJS.enc.Hex);
+            let hashBuffer = new Uint8Array(32);
+            for (let i = 0; i < 32; i++) {
+                hashBuffer[i] = parseInt(seedHash.substr(i*2, 2), 16);
+            }
+
+            while (generated < length) {
+                const inputStream = new Uint8Array(36);
+                inputStream.set(hashBuffer, 0);
+                inputStream[32] = (counter >> 24) & 0xFF;
+                inputStream[33] = (counter >> 16) & 0xFF;
+                inputStream[34] = (counter >> 8) & 0xFF;
+                inputStream[35] = counter & 0xFF;
+
+                const currentHash = CryptoJS.SHA256(CryptoJS.lib.WordArray.create(inputStream))
+                    .toString(CryptoJS.enc.Hex);
+                
+                const hashArray = new Uint8Array(32);
+                for (let i = 0; i < 32; i++) {
+                    hashArray[i] = parseInt(currentHash.substr(i*2, 2), 16);
+                }
+
+                const bytesNeeded = Math.min(hashArray.length, length - generated);
+                keyStream.set(hashArray.subarray(0, bytesNeeded), generated);
+                generated += bytesNeeded;
+                counter++;
+                hashBuffer = hashArray;
+            }
+
+            return keyStream;
+        }
+
+        function xorBytes(a, b) {
+            if (a.length !== b.length) {
+                throw new Error("Byte arrays must be of the same length");
+            }
+            const result = new Uint8Array(a.length);
+            for (let i = 0; i < a.length; i++) {
+                result[i] = a[i] ^ b[i];
+            }
+            return result;
+        }
+
+        async function encodeMessage() {
+            try {
+                const message = document.getElementById('input').value;
+                const seed = document.getElementById('seed').value;
+                
+                const encoder = new TextEncoder();
+                const messageBytes = encoder.encode(message);
+                const keyStream = await generateKeyStream(messageBytes.length, seed);
+                
+                const encodedBytes = xorBytes(messageBytes, keyStream);
+                const encodedString = btoa(String.fromCharCode.apply(null, encodedBytes));
+                
+                document.getElementById('output').value = encodedString;
+            } catch (error) {
+                alert(`Encoding error: ${error.message}`);
+            }
+        }
+
+        async function decodeMessage() {
+            try {
+                const encodedString = document.getElementById('input').value;
+                const seed = document.getElementById('seed').value;
+                
+                const decodedBytes = Uint8Array.from(atob(encodedString), c => c.charCodeAt(0));
+                const keyStream = await generateKeyStream(decodedBytes.length, seed);
+                
+                const messageBytes = xorBytes(decodedBytes, keyStream);
+                const message = new TextDecoder().decode(messageBytes);
+                
+                document.getElementById('output').value = message;
+            } catch (error) {
+                alert(`Decoding error: ${error.message}`);
+            }
+        }
+    </script>
+</body>
+</html>
